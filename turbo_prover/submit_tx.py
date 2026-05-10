@@ -65,7 +65,12 @@ def log(msg):
 # ==================== Web2: 上传 Proof 到 API ====================
 
 def build_proof_data(filepaths_str):
-    """读取 proof 文件 → Base64 编码 → 套娃封装"""
+    """
+    真实编码流程（从抓包确认）：
+    文件原始字节 → Gzip 压缩 → Base64 → 包裹成"[x]"数组 → 整体再 Base64
+    """
+    import gzip as gzip_mod
+
     filepaths = [p.strip() for p in filepaths_str.split(',') if p.strip()]
     inner_b64_list = []
 
@@ -84,12 +89,19 @@ def build_proof_data(filepaths_str):
         with open(filepath, "rb") as f:
             raw_bytes = f.read()
 
-        log(f"  [+] 文件就绪: {len(raw_bytes)} bytes")
-        inner_b64_list.append(base64.b64encode(raw_bytes).decode('utf-8'))
+        log(f"  [+] 文件就绪: {len(raw_bytes)} bytes (原始)")
 
-    # [Base64_1, Base64_2, ...] → 整体再 Base64
+        # 关键：先 Gzip 压缩，再 Base64
+        compressed = gzip_mod.compress(raw_bytes)
+        log(f"  [+] Gzip 压缩后: {len(compressed)} bytes")
+        inner_b64_list.append(base64.b64encode(compressed).decode('utf-8'))
+
+    # 包裹成 JSON 数组字符串: "[Base64_gzip_1,Base64_gzip_2]"
     wrapped_str = f"[{','.join(inner_b64_list)}]"
+
+    # 整体再做一次 Base64（套娃）
     outer_b64 = base64.b64encode(wrapped_str.encode('utf-8')).decode('utf-8')
+    log(f"  [+] 最终 proofData 长度: {len(outer_b64)} chars")
     return outer_b64
 
 
