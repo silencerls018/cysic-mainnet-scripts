@@ -1,0 +1,37 @@
+# Custom Prover Configuration
+# Copy your private key from ~/cysic-prover/data/assets/prover_*.key
+
+# Worker private key (hex, no 0x prefix)
+private_key: "YOUR_PRIVATE_KEY_HERE"
+
+# Worker address (derived from private key)
+worker_address: "0xADcA5d33FA9c47feb62f165F0d457B5cade58A6f"
+
+# Bid price
+bid: "0.01"
+
+# Server endpoints
+server:
+  ws_endpoint: "wss://api.prover.xyz/ws"
+  api_endpoint: "https://api.prover.xyz"
+  venus_grpc_endpoint: "127.0.0.1:7000"
+
+# Timing (seconds)
+timing:
+  heartbeat_interval: 14
+  bid_delay: 0
+  accept_delay: 0
+  submit_hash_delay: 0
+  submit_data_delay: 0
+
+# Client info
+client:
+  type: 1
+  version: "1.1.0"
+
+# Proof cache directory
+cache_dir: "./cache"
+
+# Logging
+log_level: "INFO"
+log_file: "./logs/prover.log"
