@@ -269,15 +269,24 @@ class CustomProver:
 
     # ==================== Proof File Management ====================
 
+    CARGO_ZISK = "/root/venus_v0_1_6/target/release/cargo-zisk-real"
+    ELF = "/root/venus_v0_1_6/guest/zisk-eth-client/bin/guests/stateless-validator-reth/target/riscv64ima-zisk-zkvm-elf/release/zec-reth"
+    PROVING_KEY = "/root/venus_v0_1_6/build/provingKey"
+
     async def _get_proof_files(self, task: Task) -> list:
         """
         Get proof files for all blocks in the task.
-        First check cache, then wait for venus_prover_server to generate.
+        1. Check cache first
+        2. If no cache, download input from S3 + run cargo-zisk-real
         """
+        import subprocess
+        import aiohttp
+
         proof_files = []
 
-        for item in task.input_files:
+        for idx, item in enumerate(task.input_files):
             bh = item.get("BlockHeight")
+            s3_url = item.get("S3Url")
             if not bh:
                 continue
 
@@ -289,19 +298,79 @@ class CustomProver:
                 logger.info(f"  Block {bh}: cache hit!")
                 continue
 
-            # Wait for venus_prover_server output
-            pattern = os.path.join(self.proof_output_dir, f"{bh}_*/vadcop_final_proof.bin")
-            deadline = time.time() + 600  # 10 min timeout
+            # Check if already computed in proof_output_dir
+            existing = glob.glob(os.path.join(self.proof_output_dir, f"{bh}_*/vadcop_final_proof.bin"))
+            if existing:
+                proof_files.append(existing[0])
+                logger.info(f"  Block {bh}: already computed!")
+                continue
 
-            while time.time() < deadline:
-                matches = glob.glob(pattern)
-                if matches:
-                    proof_files.append(matches[0])
-                    logger.info(f"  Block {bh}: proof ready!")
-                    break
-                await asyncio.sleep(2)
-            else:
-                logger.error(f"  Block {bh}: timeout waiting for proof")
+            # Need to compute: download input + run cargo-zisk-real
+            logger.info(f"  Block {bh}: downloading input...")
+
+            # Download input
+            input_dir = os.path.join(self.cache_dir, f"prove_{bh}_{idx}")
+            os.makedirs(input_dir, exist_ok=True)
+            input_file = os.path.join(input_dir, "input.bin")
+
+            if not os.path.exists(input_file):
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(s3_url) as resp:
+                            if resp.status == 200:
+                                data = await resp.read()
+                                # Check if gzipped
+                                if data[:2] == b'\x1f\x8b':
+                                    import gzip as gz
+                                    data = gz.decompress(data)
+                                with open(input_file, 'wb') as f:
+                                    f.write(data)
+                                logger.info(f"  Block {bh}: downloaded {len(data)} bytes")
+                            else:
+                                logger.error(f"  Block {bh}: download failed HTTP {resp.status}")
+                                return []
+                except Exception as e:
+                    logger.error(f"  Block {bh}: download error: {e}")
+                    return []
+
+            # Run cargo-zisk-real
+            logger.info(f"  Block {bh}: running cargo-zisk-real...")
+            proof_dir = os.path.join(self.cache_dir, f"proof_{bh}_{idx}")
+            os.makedirs(proof_dir, exist_ok=True)
+
+            start = time.time()
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [self.CARGO_ZISK, "prove",
+                     "-k", self.PROVING_KEY,
+                     "-e", self.ELF,
+                     "-i", input_file,
+                     "-o", proof_dir,
+                     "-a", "-y", "-u"],
+                    timeout=600,
+                    capture_output=True,
+                    env={**os.environ, "ASM_UNLOCK": "true",
+                         "VENUS_DIR": "/root/venus_v0_1_6",
+                         "VENUS_OUT_DIR": "/root/venus_v0_1_6/tmp",
+                         "RUST_LOG": "info"}
+                )
+                duration = time.time() - start
+
+                proof_file = os.path.join(proof_dir, "vadcop_final_proof.bin")
+                if result.returncode == 0 and os.path.exists(proof_file):
+                    proof_files.append(proof_file)
+                    logger.info(f"  Block {bh}: proof generated in {duration:.1f}s")
+                else:
+                    logger.error(f"  Block {bh}: cargo-zisk failed (code={result.returncode})")
+                    if result.stderr:
+                        logger.error(f"  stderr: {result.stderr.decode()[:500]}")
+                    return []
+            except subprocess.TimeoutExpired:
+                logger.error(f"  Block {bh}: cargo-zisk timeout (600s)")
+                return []
+            except Exception as e:
+                logger.error(f"  Block {bh}: cargo-zisk error: {e}")
                 return []
 
         return proof_files
