@@ -2,10 +2,11 @@
 Cysic Prover - WebSocket Client
 
 Handles:
+- Login (action=1) - REQUIRED for nextStep API auth
 - Heartbeat (action=2) every 14s
-- Bid submission (action=6)
 - Start work notification (action=4)
 - Finish work notification (action=5)
+- Bid submission (action=6)
 - Receive new tasks (respType=5, gzip+base64)
 - Receive task updates (respType=3, base64)
 """
@@ -14,6 +15,8 @@ import asyncio
 import json
 import gzip
 import base64
+import time
+import uuid
 import logging
 from typing import Callable, Optional
 
@@ -30,6 +33,7 @@ RESP_TASK_UPDATE = 3
 RESP_NEW_TASK = 5
 
 # Client → Server
+ACTION_LOGIN = 1
 ACTION_HEARTBEAT = 2
 ACTION_START_WORK = 4
 ACTION_FINISH_WORK = 5
@@ -40,8 +44,10 @@ class WSClient:
     def __init__(self, signer: CysicSigner, config: dict,
                  on_new_task=None, on_task_update=None):
         self.signer = signer
+        self.config = config
         self.ws_url = config["server"]["ws_endpoint"]
         self.bid_price = config["bid"]
+        self.claim_reward_address = config.get("claim_reward_address", "")
         self.on_new_task = on_new_task
         self.on_task_update = on_task_update
         self.ws = None
@@ -60,8 +66,11 @@ class WSClient:
         self._running = True
         logger.info("WebSocket connected")
 
-        # Send initial heartbeat
-        await self._send_heartbeat()
+        # Step 1: Send LOGIN (action=1) - REQUIRED for nextStep API auth
+        await self._send_login()
+
+        # Step 2: Send start work (action=4)
+        await self.send_start_work()
 
         # Start background tasks
         asyncio.create_task(self._heartbeat_loop())
@@ -88,12 +97,27 @@ class WSClient:
         data = self.signer.make_work_notify()
         await self._send({"action": ACTION_FINISH_WORK, "data": data})
 
+    async def _send_login(self):
+        """action=1: Login/register - REQUIRED for nextStep API to work"""
+        data = {
+            "clientType": 1,
+            "clientVersion": "1.1.0",
+            "workerAddress": self.signer.eth_address,
+            "claimRewardAddress": self.claim_reward_address,
+            "supportTaskType": ["venus"],
+            "timestamp": int(time.time()),
+            "nonce": str(uuid.uuid4()),
+        }
+        data["sign"] = self.signer.sign_api(data)
+        await self._send({"action": ACTION_LOGIN, "data": data})
+        logger.info("LOGIN sent (action=1)")
+
     async def _send_heartbeat(self):
         data = self.signer.make_heartbeat()
         await self._send({"action": ACTION_HEARTBEAT, "data": data})
 
     async def _send(self, msg: dict):
-        if self.ws and self.ws.open:
+        if self.ws:
             await self.ws.send(json.dumps(msg))
         else:
             logger.error("WebSocket not connected")
