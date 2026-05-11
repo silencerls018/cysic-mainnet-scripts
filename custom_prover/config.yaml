@@ -1,0 +1,44 @@
+# ================================================================
+# Cysic Custom Prover Configuration
+# ================================================================
+
+# Worker private key (hex, no 0x prefix)
+private_key: "YOUR_PRIVATE_KEY_HERE"
+
+# Worker 0x address (derived from private key)
+worker_address: "0xADcA5d33FA9c47feb62f165F0d457B5cade58A6f"
+
+# Bid price (CYS)
+bid: "0.01"
+
+# Server endpoints
+server:
+  ws_endpoint: "wss://api.prover.xyz/ws"
+  api_endpoint: "https://api.prover.xyz"
+  rpc_url: "https://rpc.cysic.xyz"
+  rest_url: "https://rest.cysic.xyz"
+
+# Chain config
+chain:
+  chain_id: "cysicmint_4399-1"
+  denom: "CYS"
+  gas_limit: 300000
+  gas_fee: "7500000000000000"
+  pubkey_type_url: "/cysicmint.crypto.v1.ethsecp256k1.PubKey"
+
+# Client info (sent in WebSocket messages)
+client:
+  type: 1
+  version: "1.1.0"
+
+# Proof cache directory
+cache_dir: "/root/cysic-prover/cache"
+
+# Proof output directory (where venus_prover_server writes proofs)
+proof_output_dir: "/root/venus_v0_1_6/tmp/prover_7000"
+
+# Task map directory (block → taskHash mappings)
+task_map_dir: "/root/cysic-prover/task_map"
+
+# Logging
+log_file: "/root/cysic-prover/custom_prover.log"
