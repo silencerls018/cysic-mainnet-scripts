@@ -64,23 +64,37 @@ class APIClient:
         Upload proof files via submitTaskDataRaw.
         Returns S3 URL on success, None on failure.
 
-        Encoding: file → gzip(level=6, mtime=0) → base64 → "[x,y]" → base64
+        Encoding (must use Go gzip for byte-compatibility):
+        - Each file → Go gzip (level -1) → base64 (done by gzip_tool)
+        - Join with ", " (comma + space) for multiple files
+        - Wrap in [] → final base64
         """
-        # Build proofData
+        import subprocess
+
+        GZIP_TOOL = "/root/custom_prover/gzip_tool"
+
         inner_b64_list = []
         for filepath in proof_files:
-            with open(filepath, 'rb') as f:
-                raw = f.read()
-            logger.info(f"  Reading: {filepath} ({len(raw)} bytes)")
+            logger.info(f"  Reading: {filepath}")
 
-            buf = io.BytesIO()
-            with gzip.GzipFile(fileobj=buf, mode='wb', compresslevel=6, mtime=0) as gz:
-                gz.write(raw)
-            compressed = buf.getvalue()
-            logger.info(f"  Gzip: {len(compressed)} bytes")
-            inner_b64_list.append(base64.b64encode(compressed).decode())
+            # Use Go gzip tool for byte-exact compatibility with official prover
+            try:
+                result = subprocess.run(
+                    [GZIP_TOOL, filepath],
+                    capture_output=True, timeout=30
+                )
+                if result.returncode != 0:
+                    logger.error(f"  gzip_tool failed: {result.stderr.decode()}")
+                    return None
+                inner_b64 = result.stdout.decode().strip()
+                inner_b64_list.append(inner_b64)
+                logger.info(f"  Gzip+Base64: {len(inner_b64)} chars")
+            except Exception as e:
+                logger.error(f"  gzip_tool error: {e}")
+                return None
 
-        wrapped = f"[{','.join(inner_b64_list)}]"
+        # Join with ", " (comma + space) for multiple files, wrap in []
+        wrapped = f"[{', '.join(inner_b64_list)}]"
         proof_data = base64.b64encode(wrapped.encode()).decode()
         logger.info(f"  proofData length: {len(proof_data)} chars")
 
