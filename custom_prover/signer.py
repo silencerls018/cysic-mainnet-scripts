@@ -101,12 +101,11 @@ class CysicSigner:
         return data
 
     def make_submit_data_raw(self, task_hash: str, proof_data: str) -> dict:
-        """submitTaskDataRaw API request - sign only {prover, taskHash}"""
-        sign_data = {"prover": self.eth_address, "taskHash": task_hash}
-        sig = self.sign_api(sign_data)
-        return {
+        """submitTaskDataRaw API request - sign ALL fields including proofData"""
+        payload = {
             "taskHash": task_hash,
             "prover": self.eth_address,
             "proofData": proof_data,
-            "sign": sig,
         }
+        payload["sign"] = self.sign_api(payload)
+        return payload
