@@ -2,7 +2,7 @@
 Cysic Prover - Signing Module
 
 Two types of signing:
-1. API signing: keccak256(sorted_json) → secp256k1 → v+27 → base64
+1. API/WebSocket signing: EthPersonalSign (Ethereum prefix + keccak256 + secp256k1)
 2. Chain TX signing: keccak256(SignDoc bytes) → secp256k1 (raw 65 bytes)
 """
 
@@ -30,11 +30,18 @@ class CysicSigner:
 
     def sign_api(self, data: dict) -> str:
         """
-        Sign for HTTP API / WebSocket messages.
-        Process: sort keys → JSON compact → keccak256 → ECDSA → v+27 → base64
+        EthPersonalSign for ALL API/WebSocket signatures.
+        Process: sort keys → JSON compact → add Ethereum prefix → keccak256 → ECDSA → v+27 → base64
+
+        Confirmed from reverse engineering: ALL signatures use EthPersonalSign
+        (wsSendRegisterInfoToServer, wsSendHeartbeatToServer, WsSendStartWorkToServer,
+         WsSendFinishWorkToServer, queryTaskNextStep, submitTaskDataRaw, wsSendSubmitBidToServer)
         """
         msg = json.dumps(dict(sorted(data.items())), separators=(',', ':'))
-        msg_hash = keccak(text=msg)
+        # Ethereum Personal Sign: "\x19Ethereum Signed Message:\n" + len(msg) + msg
+        prefix = f"\x19Ethereum Signed Message:\n{len(msg)}"
+        prefixed_msg = prefix.encode() + msg.encode()
+        msg_hash = keccak(prefixed_msg)
         sig = self.pk_obj.sign_msg_hash(msg_hash)
         sig_bytes = sig.to_bytes()
         final_sig = sig_bytes[:64] + bytes([sig_bytes[64] + 27])
